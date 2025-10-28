@@ -87,7 +87,7 @@ Emily Miller
 
 This analysis was completed for **EDS 223: Geospatial Analysis and Remote Sensing** at the Bren School of Environmental Science & Management, UC Santa Barbara.
 
-- **Instructor:** Ruth Oliver
+- **Instructor:** Annie Adams
 - **Assignment:** Homework 3 - Identifying the Impacts of Extreme Weather
 - **Date:** October 2025
 
