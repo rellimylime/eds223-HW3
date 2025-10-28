@@ -54,13 +54,11 @@ texas-blackout-analysis/
 - Highway and road network data for the Houston metropolitan area
 - File: `gis_osm_roads_free_1.gpkg`
 - Source: [Geofabrik Download Server](https://download.geofabrik.de/)
-- Retrieved: 2023
 
 **OpenStreetMap - Buildings**
 - Residential building footprints for the Houston metropolitan area
 - File: `gis_osm_buildings_a_free_1.gpkg`
 - Source: [Geofabrik Download Server](https://download.geofabrik.de/)
-- Retrieved: 2023
 
 **U.S. Census Bureau - American Community Survey (ACS)**
 - 5-Year estimates (2015-2019) at the census tract level for Texas
