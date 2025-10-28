@@ -1,0 +1,125 @@
+---
+title: "texas_blackout"
+format: html
+---
+
+```{r}
+library(tidyverse)
+library(sf)
+library(here)
+library(terra)
+library(stars)
+library(tmap)
+```
+
+```{r}
+# Load the data
+
+# Use rast() to read the raster files
+VIIRS_07a <- rast(here("data/VNP46A1/VNP46A1.A2021038.h08v05.001.2021039064328.tif"))
+
+VIIRS_07b <- rast(here("data/VNP46A1/VNP46A1.A2021038.h08v06.001.2021039064329.tif"))
+
+VIIRS_16a <- rast(here("data/VNP46A1/VNP46A1.A2021047.h08v05.001.2021048091106.tif"))
+
+VIIRS_16b <- rast(here("data/VNP46A1/VNP46A1.A2021047.h08v06.001.2021048091105.tif"))
+
+# User st_read() to read the gdb and gpkg files
+roads <- st_read(here("data/gis_osm_roads_free_1.gpkg/gis_osm_roads_free_1.gpkg"))
+
+houses <- st_read(here("data/gis_osm_buildings_a_free_1.gpkg/gis_osm_buildings_a_free_1.gpkg"))
+
+socio <- st_read(here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb/ACS_2019_5YR_TRACT_48_TEXAS.gdb/"))
+```
+
+```{r}
+# Print the crs of each of the loaded datasets
+
+print("VIIRS .tif files:")
+print(st_crs(VIIRS_07a)$epsg)
+print(st_crs(VIIRS_07b)$epsg)
+print(st_crs(VIIRS_16a)$epsg)
+print(st_crs(VIIRS_16b)$epsg)
+
+print("Road and building .gpkg files:")
+print(st_crs(roads)$epsg)
+print(st_crs(houses)$epsg)
+
+print("Socioeconomic .gdb file:")
+print(st_crs(socio)$epsg)
+```
+The socioeconomic data does not have a crs in its current form so we will have to extract the geometry and combine it with the relevant attributes
+```{r}
+# Print the layers in the socio gdb
+print(st_layers(here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb/ACS_2019_5YR_TRACT_48_TEXAS.gdb/")))
+
+# Extract the geometry layer
+socio_geom <- st_read(here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb/ACS_2019_5YR_TRACT_48_TEXAS.gdb/"), layer = "ACS_2019_5YR_TRACT_48_TEXAS")
+
+# Extract the income layer
+socio_income <- st_read(here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb/ACS_2019_5YR_TRACT_48_TEXAS.gdb/"), layer = "X19_INCOME")
+
+# Rename the socio_income GEOID column to match the one in socio_geom
+socio_income <- socio_income %>% 
+  rename("GEOID_Data" = "GEOID")
+
+# Join the income with the geometry by the GEOID_Data column
+socio <- socio_geom %>% left_join(socio_income, by = "GEOID_Data") %>% 
+  st_transform(st_crs(houses))
+
+# Confirm the CRS is epsg:4326
+print("CRS after extracting geometries and income attribute and transforming:")
+print(st_crs(socio)$epsg)
+```
+
+### Create blackout mask
+
+```{r}
+VIIRS_07 <- merge(VIIRS_07a, VIIRS_07b)
+
+VIIRS_16 <- merge(VIIRS_16a, VIIRS_16b)
+
+# Crop both rasters
+#VIIRS_07_houston <- crop(VIIRS_07, st_as_sfc(houston_bbox))
+#VIIRS_16_houston <- crop(VIIRS_16, st_as_sfc(houston_bbox))
+
+# Take the difference between the two
+VIIRS_houston_diff <- VIIRS_07 - VIIRS_16
+
+# Visualize
+tm_shape(VIIRS_houston_diff) + 
+  tm_raster(palette = "viridis",
+            title = "Intensity Varitaion") +
+  tm_layout(main.title = "Houston Night Lights - Difference")
+
+# Create a blackout mask where 1 = blackout and NA = no blackout
+blackout_mask <- classify(VIIRS_houston_diff,
+                      matrix(c(-Inf, 200, NA,
+                               200, Inf, 1),
+                             ncol = 3, byrow = TRUE))
+
+# Visualize the mask
+tm_shape(blackout_mask) + 
+  tm_raster(palette = "red",
+            title = "Blackout") +
+  tm_layout(main.title = "Blackout Mask",
+            legend.show = FALSE)
+
+# Vectorize the mask
+blackout_vector <- st_as_stars(blackout_mask) %>% st_as_sf(merge = TRUE)
+
+# Fix any invalid geometries
+st_make_valid(blackout_vector)
+
+# Define a Houston bounding box using the provided coordinates
+houston_bbox <- st_bbox(c(xmin = -96.5, ymin = 29, 
+                          xmax = -94.5, ymax = 30.5), 
+                        crs = st_crs(VIIRS_07))
+
+# Crop the vectorized blackout mask to Houston
+blackout_houston <- st_crop(blackout_vector, houston_bbox)
+
+# Reproject to EPSG:3083 (NAD83 / Texas Centric Albers Equal Area)
+blackout_houston <- st_transform(blackout_houston, crs = 3083)
+```
+
