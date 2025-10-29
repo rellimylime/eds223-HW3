@@ -25,9 +25,14 @@ VIIRS_16a <- rast(here("data/VNP46A1/VNP46A1.A2021047.h08v05.001.2021048091106.t
 VIIRS_16b <- rast(here("data/VNP46A1/VNP46A1.A2021047.h08v06.001.2021048091105.tif"))
 
 # User st_read() to read the gdb and gpkg files
-roads <- st_read(here("data/gis_osm_roads_free_1.gpkg/gis_osm_roads_free_1.gpkg"))
+roads <- st_read(here("data/gis_osm_roads_free_1.gpkg/gis_osm_roads_free_1.gpkg"), 
+                 query = "SELECT * FROM gis_osm_roads_free_1 WHERE fclass='motorway'")
 
-houses <- st_read(here("data/gis_osm_buildings_a_free_1.gpkg/gis_osm_buildings_a_free_1.gpkg"))
+houses <- st_read(here("data/gis_osm_buildings_a_free_1.gpkg/gis_osm_buildings_a_free_1.gpkg"), 
+                  query = "SELECT *
+FROM gis_osm_buildings_a_free_1
+WHERE (type IS NULL AND name IS NULL)
+OR type in ('residential', 'apartments', 'house', 'static_caravan', 'detached')")
 
 socio <- st_read(here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb/ACS_2019_5YR_TRACT_48_TEXAS.gdb/"))
 ```
@@ -75,13 +80,9 @@ print(st_crs(socio)$epsg)
 ### Create blackout mask
 
 ```{r}
+# Merge the cells to create a raster for each day
 VIIRS_07 <- merge(VIIRS_07a, VIIRS_07b)
-
 VIIRS_16 <- merge(VIIRS_16a, VIIRS_16b)
-
-# Crop both rasters
-#VIIRS_07_houston <- crop(VIIRS_07, st_as_sfc(houston_bbox))
-#VIIRS_16_houston <- crop(VIIRS_16, st_as_sfc(houston_bbox))
 
 # Take the difference between the two
 VIIRS_houston_diff <- VIIRS_07 - VIIRS_16
@@ -97,13 +98,6 @@ blackout_mask <- classify(VIIRS_houston_diff,
                       matrix(c(-Inf, 200, NA,
                                200, Inf, 1),
                              ncol = 3, byrow = TRUE))
-
-# Visualize the mask
-tm_shape(blackout_mask) + 
-  tm_raster(palette = "red",
-            title = "Blackout") +
-  tm_layout(main.title = "Blackout Mask",
-            legend.show = FALSE)
 
 # Vectorize the mask
 blackout_vector <- st_as_stars(blackout_mask) %>% st_as_sf(merge = TRUE)
@@ -121,5 +115,42 @@ blackout_houston <- st_crop(blackout_vector, houston_bbox)
 
 # Reproject to EPSG:3083 (NAD83 / Texas Centric Albers Equal Area)
 blackout_houston <- st_transform(blackout_houston, crs = 3083)
+
+# Visualize the mask
+tm_shape(blackout_houston) + 
+  tm_polygons(palette = "red",
+            title = "Blackout") +
+  tm_layout(main.title = "Blackout Mask",
+            legend.show = FALSE)
+```
+
+### Exclude highways from the cropped blackout mask
+
+```{r}
+# Reproject to match blackout data (EPSG:3083)
+roads <- st_transform(roads, crs = 3083)
+
+# Join all the road geometries into one and then buffer by 200m
+highway_buffer <- st_buffer(st_union(roads), 200)
+
+# Only include area futher than 200m from highways
+blackout_no_hwy <- st_difference(blackout_houston, highway_buffer)
+
+# Visualize the mask
+tm_shape(blackout_no_hwy) + 
+  tm_polygons(palette = "red",
+            title = "Blackout") +
+  tm_layout(main.title = "Blackout Mask no Highways",
+            legend.show = FALSE)
+```
+
+### Identify the number of homes likely impacted by blackouts
+
+```{r}
+# Reproject houses to match blackout data (EPSG:3083)
+houses <- st_transform(houses, crs = 3083)
+
+# Extract homes that intersect blackout areas
+blackout_homes <- st_intersection(houses, blackout_no_hwy)
 ```
 
