@@ -2,7 +2,7 @@
 title: "texas_blackout"
 format: html
 editor_options: 
-  chunk_output_type: console
+  chunk_output_type: inline
 ---
 
 ## Setup
@@ -19,6 +19,7 @@ library(terra)
 library(stars)
 library(tmap)
 library(kableExtra)
+library(basemaps)
 ```
 
 ## Data Loading and Preparation
@@ -41,15 +42,15 @@ VIIRS_16b <- rast(here("data/VNP46A1/VNP46A1.A2021047.h08v06.001.2021048091105.t
 # Use st_read() to read the gdb and gpkg files and query to extract only motorways and residential buildings
 
 highways <- st_read(here("data/gis_osm_roads_free_1.gpkg/gis_osm_roads_free_1.gpkg"), 
-                 query = "SELECT * FROM gis_osm_roads_free_1 WHERE fclass='motorway'")
+                 query = "SELECT * FROM gis_osm_roads_free_1 WHERE fclass='motorway'", quiet = TRUE)
 
 houses <- st_read(here("data/gis_osm_buildings_a_free_1.gpkg/gis_osm_buildings_a_free_1.gpkg"), 
                   query = "SELECT *
 FROM gis_osm_buildings_a_free_1
 WHERE (type IS NULL AND name IS NULL)
-OR type in ('residential', 'apartments', 'house', 'static_caravan', 'detached')")
+OR type in ('residential', 'apartments', 'house', 'static_caravan', 'detached')", quiet = TRUE)
 
-socio <- st_read(here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb/ACS_2019_5YR_TRACT_48_TEXAS.gdb/"))
+socio <- st_read(here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb/ACS_2019_5YR_TRACT_48_TEXAS.gdb/"), quiet = TRUE)
 ```
 
 ```{r}
@@ -94,11 +95,11 @@ kable(data.frame(
 
 # Extract the geometry layer
 socio_geom <- st_read(here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb/ACS_2019_5YR_TRACT_48_TEXAS.gdb/"), 
-                      layer = "ACS_2019_5YR_TRACT_48_TEXAS")
+                      layer = "ACS_2019_5YR_TRACT_48_TEXAS", quiet = TRUE)
 
 # Extract the income layer
 socio_income <- st_read(here("data/ACS_2019_5YR_TRACT_48_TEXAS.gdb/ACS_2019_5YR_TRACT_48_TEXAS.gdb/"), 
-                        layer = "X19_INCOME")
+                        layer = "X19_INCOME", quiet = TRUE)
 
 # Rename the socio_income GEOID column to match the one in socio_geom
 socio_income <- socio_income %>% 
@@ -116,89 +117,81 @@ if(!("B19013e1" %in% names(socio))) {
 
 ## Analysis
 
-### Create blackout mask
-Identify areas that experienced blackouts by comparing night light intensity before and after the storms.
+### Visualize Before and After
+Map the difference in night light before and after the storms
 
 ```{r}
 #| warning: false
 
 # Merge the tiles for each date
-VIIRS_07 <- merge(VIIRS_07a, VIIRS_07b)
-VIIRS_16 <- merge(VIIRS_16a, VIIRS_16b)
-
-# Calculate the difference in light intensity between the two dates
-VIIRS_houston_diff <- VIIRS_07 - VIIRS_16
-
-# Classify areas with light intensity drops greater than 200 as blackouts
-blackout_mask <- classify(VIIRS_houston_diff,
-                      matrix(c(-Inf, 200, NA,  # Not a blackout
-                               200, Inf, 1),   # Balckout
-                             ncol = 3, byrow = TRUE))
-```
-
-### Visualize the changes in night light
-
-```{r}
-# Replace non-positive values with NA
-VIIRS_07[VIIRS_07 <= 0] <- NA
-VIIRS_16[VIIRS_16 <= 0] <- NA
-
-# Convert NA values to polygons
-#na_polys <- r
-
-plot(VIIRS_07) +
-plot(VIIRS_16)
-
-combined <- c(VIIRS_07, VIIRS_16)
-names(combined) <- c("February 7, 2021", "February 16, 2021")
+VIIRS_07 <- merge(VIIRS_07a, VIIRS_07b)   # February 7, 2021
+VIIRS_16 <- merge(VIIRS_16a, VIIRS_16b)   # February 16, 2021
 
 
+# Crop, mask, and combine for plotting purposes
+# 1. Define a Houston bounding box using the provided coordinates
+HOUSTON_BBOX <- st_bbox(c(xmin = -96.5, ymin = 29, 
+                          xmax = -94.5, ymax = 30.5), 
+                        crs = st_crs(VIIRS_07))
 
-tm_shape(combined) +
-  tm_raster(palette = "inferno",
-            style = "quantile",
-            n = 6,
-            title = "Night Light Intensity\n(nW cm⁻² sr⁻¹)",
-            colorNA = "black") +
-  tm_layout(main.title = "Houston Night Lights: Before and After February 2021 Storm",
-            main.title.size = 3,
-            legend.outside = TRUE) +
+# 2. Crop rasters using Houston bbox
+crop_07 <- crop(VIIRS_07, HOUSTON_BBOX)
+crop_16 <- crop(VIIRS_16, HOUSTON_BBOX)
+
+# 3. Mask non-positive values and values above 1000
+masked_07 <- crop_07
+masked_07[(masked_07 > 1000) | (masked_07 <= 0)] <- NA
+
+masked_16 <- crop_16
+masked_16[(masked_16 > 1000)  | (masked_07 <= 0)] <- NA
+
+# 4. Combine cropped and masked rasters
+combined_crop <- c(masked_07, masked_16)
+
+# Name the layers
+names(combined_crop) <- c("February 7, 2021 (Before)", "February 16, 2021 (After)")
+
+# Plot the before and after
+tm_shape(combined_crop) +
+  tm_raster(
+    palette = "inferno",,
+    title = "Night Light Intensity"
+  ) +
   tm_facets(ncol = 2, free.scales = FALSE) +
-  tm_graticules(lwd = 0.5)
-  
+  tm_layout(
+    main.title = "Houston Night Lights Before and After Feb 2021 winter Storm Blackouts",
+    main.title.size = 1.2,
+    legend.outside = TRUE,
+    legend.title.size = 0.8,
+    legend.text.size = 0.6,
+    legend.bg = FALSE,
+    frame = FALSE
+  ) +
+  tm_graticules(lwd = 0.3, col = "grey70", alpha = 0.4)
 ```
 
-```{r}
-#| eval: false
-
-# Check the actual data ranges
-sum_07 <- summary(values(VIIRS_07))
-sum_16 <- summary(values(VIIRS_16))
-
-sum_07
-sum_16
-
-if (any(sum_16 > sum_07)) {
-  stop(":(")
-}
-
-```
+Use the blackout mask to mask, bounding box to crop crop, and st_as_stars -> st_as_sf to vectorize the raster
 
 ```{r}
 #| warning: false
 
+# Calculate the difference in light intensity between the two dates
+VIIRS_houston_diff <- VIIRS_07 - VIIRS_16
+
+
+# Classify areas with light intensity drops greater than 200 as blackouts
+blackout_mask <- classify(VIIRS_houston_diff,
+                      matrix(c(-Inf, 200, NA,  # Not a blackout
+                               200, Inf, 1),   # Blackout
+                             ncol = 3, byrow = TRUE))
+
 # Vectorize the blackout mask and fix any invalid geometries
 blackout_vector <- st_as_stars(blackout_mask) %>% 
-  st_as_sf(merge = TRUE) %>% 
+  st_as_sf() %>% 
   st_make_valid()
 
-# Define a Houston bounding box using the provided coordinates
-houston_bbox <- st_bbox(c(xmin = -96.5, ymin = 29, 
-                          xmax = -94.5, ymax = 30.5), 
-                        crs = st_crs(VIIRS_07))
-
 # Crop the vectorized blackout mask to the Houston area
-blackout_houston <- st_crop(blackout_vector, houston_bbox)
+blackout_houston <- st_crop(blackout_vector, HOUSTON_BBOX)
 
 # Reproject to EPSG:3083 (NAD83 / Texas Centric Albers Equal Area)
 blackout_houston <- st_transform(blackout_houston, crs = 3083)
@@ -209,61 +202,22 @@ if(nrow(blackout_houston) == 0) {
 }
 ```
 
-```{r}
-# Create cropped rasters for Houston bbox, then mask non-positive values
-crop_07 <- crop(VIIRS_07, houston_bbox)
-crop_16 <- crop(VIIRS_16, houston_bbox)
-
-crop_07[crop_07 <= 0] <- NA
-crop_16[crop_16 <= 0] <- NA
-
-sum_07c <- summary(values(crop_07))
-sum_16c <- summary(values(crop_16))
-
-sum_07c
-sum_16c
-
-combined_crop <- c(crop_07, crop_16)
-names(combined_crop) <- c("Before Storm", "After Storm")
-
-tm_shape(combined_crop) +
-  tm_raster(
-    palette = "inferno",
-    style = "quantile",
-    n = 6,
-    title = "Night Light Intensity\n(nW cm⁻² sr⁻¹)"
-  ) +
-  tm_facets(ncol = 2, free.scales = FALSE) +
-  tm_layout(
-    main.title = "Houston Night Lights Before and After Feb 2021 Blackout (Cropped)",
-    main.title.size = 1.2,
-    legend.outside = TRUE,
-    legend.outside.position = "right",
-    legend.title.size = 0.8,
-    legend.text.size = 0.6,
-    legend.bg = FALSE,
-    legend.frame = FALSE,
-    frame = FALSE
-  ) +
-  tm_graticules(lwd = 0.3, col = "grey70")
-```
-
+Plot the resulting raster
 
 ```{r}
-tm_shape(blackout_houston) + 
-  tm_polygons(col = "red",
-              border.col = "darkred",
-              title = "Blackout Areas") +
-  tm_layout(main.title = "Initial Blackout Areas in Houston",
-            main.title.size = 1.2,
-            legend.show = FALSE) +
-  tm_scale_bar(position = c("left", "bottom")) +
+tm_basemap("CartoDB.VoyagerNoLabels") + 
+  tm_shape(blackout_houston) +
+  tm_polygons(fill = "red",
+              col = "darkred") +
+  tm_title("Initial Blackout Areas in Houston", size = 1.2) +
+  tm_layout(legend.show = FALSE) +
+  tm_scalebar(position = c("left", "bottom")) +
   tm_compass(position = c("right", "top"))
 ```
 
 ### Exclude highways from the cropped blackout mask
-Highways may show reduced light intensity due to decreased traffic rather than power outages. We exclude areas within 200m of highways.
 
+Highways may show reduced light intensity due to decreased traffic rather than power outages. Exclude areas within 200m of highways.
 
 ```{r}
 #| warning: false
@@ -285,11 +239,12 @@ if(nrow(blackout_final) == 0) {
 }
 ```
 
-### Map blackout areas (highways excluded)
+Map blackout area excluded highways
 
 ```{r}
+tm_basemap("CartoDB.VoyagerNoLabels") +
 tm_shape(highway_buffer) +
-  tm_borders(col = "blue", col_alpha = 0.5, lwd = 1) +
+  tm_borders(col = "#895129", col_alpha = 0.5, lwd = 1) +
 tm_shape(blackout_final) +
   tm_polygons(col = "red",
               border.col = "darkred",
@@ -302,7 +257,7 @@ tm_shape(blackout_final) +
   tm_compass(position = c("right", "top")) +
   tm_add_legend(type = c("lines"),
                 labels = c("Highway buffer (200m)"),
-                col = c("blue")) +
+                col = c("#895129")) +
   tm_add_legend(type = c("symbols"),
                 labels = c("Blackout areas"),
                 fill = c("red"),
@@ -315,37 +270,64 @@ tm_shape(blackout_final) +
 ```{r}
 #| warning: false
 
-# Reproject houses to match blackout crs (EPSG:3083)
+# Reproject houses to match blackout crs (EPSG:3083) before intersecting
 houses <- st_transform(houses, crs = 3083)
 
 # Extract homes that intersect blackout areas
 blackout_homes <- st_intersection(houses, blackout_final)
 
-# Calculate number of impacted homes
-n_blackout_homes <- nrow(blackout_homes)
+# Count number of impacted homes
+n_blackout_homes <- length(unique(blackout_homes$osm_id))
+
 n_total_homes <- nrow(houses)
+
+# Calculate percent impacted
 pct_impacted <- round((n_blackout_homes / n_total_homes) * 100, 1)
 ```
 
-**Results:** Approximately **'r format(n_blackout_homes, big.mark = ",")'** homes (`r pct_impacted`% of residential buildings in the dataset) experienced blackouts during the February 2021 storms.
+
+**Results:** Approximately **`r format(n_blackout_homes, big.mark = ",")`** homes (`r pct_impacted`% of residential buildings in the dataset) experienced blackouts during the February 2021 storms.
 
 ### Map impacted homes
 
 ```{r}
-tm_shape(blackout_final) +
-  tm_polygons(col = "grey80", 
-              border.col = "grey60",
-              title = "Blackout Area") +
-  tm_shape(blackout_homes) +
-  tm_dots(col = "red",
-          alpha = 0.4,
-          size = 0.01,
-          title = "Homes Impacted") +
-  tm_layout(main.title = "Homes in Houston Impacted by Blackouts",
-            main.title.size = 1.2,
-            legend.position = c("right", "bottom"),
-            legend.title.size = 1) +
-  tm_scale_bar(position = c("left", "bottom")) +
+#| warning: false
+
+# Create points for all homes for plotting
+all_homes_points <- st_centroid(houses)
+
+# Separate impacted and not impacted homes
+not_impacted_homes <- all_homes_points[!all_homes_points$osm_id %in% blackout_homes$osm_id, ]
+
+
+impacted_homes_points <- st_centroid(blackout_homes)
+
+# Map with layers in order: blackout areas, not impacted, then impacted on top
+tm_basemap("CartoDB.VoyagerNoLabels") +
+  tm_shape(blackout_final) +
+  tm_polygons(fill = "grey80", 
+              col = "grey60") +
+  tm_shape(not_impacted_homes) +
+  tm_dots(fill = "#FF7F7F",
+          size = 0.005,
+          fill_alpha = 0.05) +
+  tm_shape(impacted_homes_points) +
+  tm_dots(fill = "darkred",
+          size = 0.008,
+          fill_alpha = 0.6) +
+  tm_title("Homes in Houston Impacted by Blackouts", size = 1) +
+  tm_layout(legend.outside = TRUE) +
+  tm_add_legend(type = "polygons",
+                labels = "Blackout area",
+                fill = "grey80",
+                col = "grey60",
+                size = 0.2) +
+  tm_add_legend(type = "symbols",
+                labels = c("Impacted homes", "Not impacted homes"),
+                fill = c("darkred", "#FF7F7F"),
+                shape = 19,
+                size = 0.5) +
+  tm_scalebar(position = c("left", "bottom")) +
   tm_compass(position = c("right", "top"))
 ```
 
@@ -355,76 +337,107 @@ Investigate whether census tracts with different median household incomes experi
 ```{r}
 #| warning: false
 
-# Convert socio to EPSG:3083
-socio <- st_transform(socio, st_crs(blackout_houston))
+# Transform census data to match blackout CRS (EPSG:3083)
+socio <- st_transform(socio, crs = 3083)
 
-# Identify census tracts that intersect with blackout areas
-tracts_blackout <- st_intersection(socio, blackout_final)
-
-# Identify all tracts in Houston area
+# Crop to Houston
 houston_tracts <- st_crop(socio, st_bbox(blackout_houston))
 
-# Mark which tracts experienced blackouts using the intersection
-houston_tracts$blackout <- houston_tracts$GEOID_Data %in% tracts_blackout$GEOID_Data
+# Count number of impacted homes per census tract
+houston_tracts$n_homes <- as.numeric(lengths(st_intersects(houston_tracts, blackout_homes)))
 
-# Factorize logical values
-houston_tracts$blackout <- factor(houston_tracts$blackout, levels = c("TRUE", "FALSE"))
+# Create categories for visualization
+houston_tracts$impact_category <- cut(houston_tracts$n_homes,
+                                       breaks = c(1, 10, 50, 150, 500, 1500, Inf),
+                                       labels = c("Very Low (1-10)",
+                                                 "Low (11-50)", 
+                                                 "Medium (51-150)", 
+                                                 "High (151-500)",
+                                                 "Very High (501-1,500)",
+                                                 "Extreme (>1,500)"))
 
-sum(st_is_empty(houston_tracts))
+# Create blackout indicator
+houston_tracts$blackout <- factor(houston_tracts$n_homes > 0,
+                                  levels = c(TRUE, FALSE),
+                                  labels = c("Blackout", "No Blackout"))
 
-# Verify median income data is available
+# Verify data quality
 if(sum(!is.na(houston_tracts$B19013e1)) == 0) {
   stop("No valid median income data found")
 }
 ```
 
+```{r}
+# Summary statistics
+cat("Census tract summary:\n")
+cat("Total tracts:", nrow(houston_tracts), "\n")
+cat("Tracts with blackouts:", sum(houston_tracts$n_homes > 0), "\n")
+cat("Tracts without blackouts:", sum(houston_tracts$n_homes == 0), "\n")
+```
+
+```{r}
+# Map the census tracts that lost power
+tm_basemap("CartoDB.VoyagerNoLabels") + 
+  tm_shape(houston_tracts) +
+  tm_fill(fill = "impact_category",
+          fill.scale = tm_scale(values = c("#fee8c8", "#fdd49e", "#fc8d59", "#e34a33", "#b30000", "darkred"),
+                                value.na = "transparent"),
+          fill.legend = tm_legend(title = "Impacted Homes\nper Tract")) +
+  tm_borders(col = "grey40", lwd = 0.01) +
+  tm_title("Census Tracts: Number of Homes Impacted by Blackouts") +
+  tm_scalebar(position = c("left", "top")) +
+  tm_compass(position = c("right", "bottom")) +
+  tm_layout(legend.outside = TRUE)
+
+```
+
 ### Map of census tracts impacted by blackouts
 
 ```{r}
-tm_shape(houston_tracts) +
-  tm_polygons(col = "blackout",
-              palette = c('TRUE' = "red", 'FALSE' = "grey80"),
-              border.col = "white",
-              lwd = 0.2,
-              title = "Blackout Status\n(Yes/No, >200 nW cm⁻² sr⁻¹ drop)") +
-  tm_layout(main.title = "Census Tracts in Houston by Blackout Status",
-            main.title.size = 1.2,
-            legend.outside = TRUE,
-            legend.title.size = 1) +
-  tm_scale_bar(position = c("left", "bottom")) +
-  tm_compass(position = c("right", "top"))
+# Filter to only tracts with blackouts
+blackout_tracts_only <- houston_tracts %>% 
+  filter(blackout == "Blackout")
+
+# Plot tracts with blackouts
+tm_basemap("CartoDB.VoyagerNoLabels") +
+tm_shape(blackout_tracts_only) +
+  tm_fill(fill = "darkred",
+          fill_alpha = 0.9) +
+  tm_borders(col = "white", lwd = 0.2) +
+  tm_title("Census Tracts with Blackouts in Houston") +
+  tm_scalebar(position = c("left", "top")) +
+  tm_compass(position = c("right", "bottom")) +
+  tm_layout(legend.show = FALSE)
 ```
 ### Compare income distributions
 
-```{r fig-income, warning=FALSE, fig.width=8, fig.height=5}
+```{r}
+#| warning: false
+
+# Remove NA from income values
+houston_tracts_no_na <- houston_tracts %>% filter(!is.na(B19013e1))
+
 # Create comparison plot
-ggplot(houston_tracts %>% filter(!is.na(B19013e1)), 
-       aes(x = blackout, y = B19013e1, fill = blackout)) +
+ggplot(houston_tracts_no_na, aes(x = blackout, y = B19013e1, fill = blackout)) +
   geom_boxplot(alpha = 0.7) +
-  scale_fill_manual(
-    name = "Blackout Status",
-    values = c("TRUE" = "#D55E00", "FALSE" = "#999999"),
-    labels = c("TRUE" = "Blackout", "FALSE" = "No Blackout")
-  ) +
+  scale_fill_manual(name = "Blackout Status", 
+                    values = c("Blackout" = "#D55E00", 
+                               "No Blackout" = "#999999")) +
   scale_y_continuous(labels = scales::dollar_format()) +
-  labs(
-    title = "Median Household Income by Blackout Status",
-    subtitle = "Houston Metropolitan Area Census Tracts",
-    x = "Blackout Status",
-    y = "Median Household Income (USD, 2019 ACS)",
-    caption = "Source: U.S. Census Bureau ACS 5-Year Estimates (2015-2019)"
-  ) +
+  labs(title = "Median Household Income by Blackout Status", 
+       subtitle = "Houston Metropolitan Area Census Tracts", 
+       x = "Blackout Status", 
+       y = "Median Household Income (USD, 2019 ACS)", 
+       caption = "Source: U.S. Census Bureau ACS 5-Year Estimates (2015-2019)") +
   theme_minimal() +
-  theme(
-    legend.position = "right",
-    plot.title = element_text(size = 14, face = "bold"),
-    axis.title = element_text(size = 11)
-  )
+  theme(legend.position = "right", 
+        plot.title = element_text(size = 14, face = "bold"), 
+        axis.title = element_text(size = 11))
 ```
 
 ### Summary statistics
 
-```{r income-summary}
+```{r}
 income_stats <- houston_tracts %>%
   st_drop_geometry() %>%
   filter(!is.na(B19013e1)) %>%
@@ -449,4 +462,4 @@ kable(income_stats,
 
 This analysis identified approximately **`r format(n_blackout_homes, big.mark = ",")`** homes in the Houston metropolitan area that likely experienced power outages during the February 2021 winter storms. By comparing night light intensity before (February 7) and after (February 16) the storms, we created a spatial mask of blackout areas and linked these to residential building locations.
 
-The income analysis reveals that census tracts experiencing blackouts had a median household income of **$`r format(income_stats$"Median Income"[income_stats$blackout == "Blackout"], big.mark = ",")`**, compared to **$`r format(income_stats$"Median Income"[income_stats$blackout == "No Blackout"], big.mark = ",")`** for tracts without blackouts, suggesting [describe what the data shows about income disparities].
+The income analysis reveals that census tracts experiencing blackouts had a median household income of **`r format(income_stats$"Median Income"[income_stats$blackout == "Blackout"], big.mark = ",")`**, compared to **`r format(income_stats$"Median Income"[income_stats$blackout == "No Blackout"], big.mark = ",")`** for tracts without blackouts, suggesting ... COMPLETE THIS ANALSYS.
