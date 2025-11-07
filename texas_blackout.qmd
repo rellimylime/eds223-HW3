@@ -27,7 +27,7 @@ library(terra)
 library(stars)
 library(tmap)
 library(kableExtra)
-library(basemaps)
+library(testthat)
 ```
 
 ## Data Loading and Preparation
@@ -116,11 +116,15 @@ socio_income <- socio_income %>%
 # Join the income with the geometry by the GEOID_Data column
 socio <- socio_geom %>% left_join(socio_income, by = "GEOID_Data") %>% 
   st_transform(st_crs(houses))
+```
+
+```{r}
+#| include: false
 
 # Verify successful join
-if(!("B19013e1" %in% names(socio))) {
-  stop("Median household income (Estimate) column not found after join")
-}
+test_that("Income column exists after join", {
+  expect_true("B19013e1" %in% names(socio))
+})
 ```
 
 ## Analysis
@@ -208,11 +212,15 @@ blackout_houston <- st_crop(blackout_vector, HOUSTON_BBOX)
 
 # Reproject to EPSG:3083 (NAD83 / Texas Centric Albers Equal Area)
 blackout_houston <- st_transform(blackout_houston, crs = 3083)
+```
+
+```{r}
+#| include: false
 
 # Verify cropping was successful
-if(nrow(blackout_houston) == 0) {
-  stop("No blackout areas remain after cropping to Houston")
-}
+test_that("Blackout areas remain after cropping to Houston", {
+  expect_gt(nrow(blackout_houston), 0)
+})
 ```
 
 Plot the resulting raster
@@ -253,11 +261,15 @@ highway_buffer <- highways %>%
 
 # Remove highway buffer zones from blackout areas
 blackout_final <- st_difference(blackout_houston, highway_buffer)
+```
+
+```{r}
+#| include: false
 
 # Verify data remains after highway exclusion
-if(nrow(blackout_final) == 0) {
-  warning("No blackout areas remain after excluding highways")
-}
+test_that("Blackout areas remain after excluding highways", {
+  expect_gt(nrow(blackout_final), 0)
+})
 ```
 
 ### Identify the number of homes impacted by blackouts
@@ -360,11 +372,15 @@ houston_tracts$impact_category <- cut(houston_tracts$n_homes,
 houston_tracts$blackout <- factor(houston_tracts$n_homes > 0,
                                   levels = c(TRUE, FALSE),
                                   labels = c("Blackout", "No Blackout"))
+```
+
+```{r}
+#| include: false
 
 # Verify data quality
-if(sum(!is.na(houston_tracts$B19013e1)) == 0) {
-  stop("No valid median income data found")
-}
+test_that("Valid median income data exists", {
+  expect_gt(sum(!is.na(houston_tracts$B19013e1)), 0)
+})
 ```
 
 ```{r}
