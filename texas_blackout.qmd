@@ -403,6 +403,10 @@ tm_basemap("CartoDB.VoyagerNoLabels") +
 ### Map of census tracts impacted by blackouts
 
 ```{r}
+#| fig.width: 10
+#| fig.height: 9
+#| warning: false
+
 # Filter to only tracts with blackouts
 blackout_tracts_only <- houston_tracts %>% 
   filter(blackout == "Blackout")
