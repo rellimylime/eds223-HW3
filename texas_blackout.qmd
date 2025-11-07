@@ -119,7 +119,7 @@ socio <- socio_geom %>% left_join(socio_income, by = "GEOID_Data") %>%
 ```
 
 ```{r}
-#| include: false
+#| echo: false
 
 # Verify successful join
 test_that("Income column exists after join", {
@@ -215,7 +215,7 @@ blackout_houston <- st_transform(blackout_houston, crs = 3083)
 ```
 
 ```{r}
-#| include: false
+#| echo: false
 
 # Verify cropping was successful
 test_that("Blackout areas remain after cropping to Houston", {
@@ -264,7 +264,7 @@ blackout_final <- st_difference(blackout_houston, highway_buffer)
 ```
 
 ```{r}
-#| include: false
+#| echo: false
 
 # Verify data remains after highway exclusion
 test_that("Blackout areas remain after excluding highways", {
@@ -375,7 +375,7 @@ houston_tracts$blackout <- factor(houston_tracts$n_homes > 0,
 ```
 
 ```{r}
-#| include: false
+#| echo: false
 
 # Verify data quality
 test_that("Valid median income data exists", {
